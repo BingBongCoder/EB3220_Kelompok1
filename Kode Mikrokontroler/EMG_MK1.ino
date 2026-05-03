@@ -11,18 +11,20 @@ const int ledPin3 = D10;
 const int PMOSPin = D5;    
 const int touchPin = D2; 
 
+// Variabel Wifi
+const int DEVICE_ID = 1;
+const char* ssid = "BMEhost";
+const char* password = "BMEhosting";
+const uint16_t port = 8080;
+const long sendInterval = 20;
+
 // Variabel Sensor dan Sinyal
 const unsigned long intervalMicros = 1000;
 unsigned long previousMicros = 0;
-float x[4] = {0, 0, 0, 0}; 
-float y[4] = {0, 0, 0, 0}; 
-float x_bsf[5] = {0, 0, 0, 0, 0}; 
-float y_bsf[5] = {0, 0, 0, 0, 0}; 
-float x_hpf[3] = {0, 0, 0};
-float y_hpf[3] = {0, 0, 0};
+float x[4], y[4], x_bsf[5], y_bsf[5], x_hpf[3], y_hpf[3];
 float filteredEnvelope = 0;
 
-// Konstanta Filter Digital
+// Konstanta Filter Digital (Butterworth & BSF)
 const float b[] = {0, 0.8005924035f, 1.6011848069f, 0.8005924035f};
 const float a[] = {0, 1.0000000000f, 1.5610180758f, 0.6413515381f};
 const float b_bsf[] = {0.991153595101663f, -3.770646770422277f, 5.568476159765916f, -3.770646770422277f, 0.991153595101663f};
@@ -30,10 +32,6 @@ const float a_bsf[] = {1.000000000000000f, -3.787399533082511f, 5.56839789935512
 const float b_hpf[] = {0.914969144113082f, -1.829938288226165f, 0.914969144113082f};
 const float a_hpf[] = {1.000000000000000f, -1.822694925196308f, 0.837181651256022f};
 
-// Variabel Wifi
-const char* ssid = "BMEhost";
-const char* password = "BMEhosting";
-const uint16_t port = 8080;
 WiFiClient client;
 
 // Variabel Status
@@ -43,7 +41,7 @@ unsigned long connectedMillis = 0;
 unsigned long previousSendMillis = 0;
 unsigned long lastBatteryMillis = 0;
 unsigned long lastDisconnectTime = 0; 
-const int dimIntensity = 12; // 5% intensitas LED
+const int dimIntensity = 12; 
 
 // Prototipe Fungsi
 void setLED(int r, int g, int b);
@@ -67,7 +65,7 @@ void setup() {
   Serial.println("Michael Liebing      18323016");
   Serial.println("Jonathan Otto        18323017");
   Serial.println("Jerry Alexander Tjoa 18323026");
-
+  Serial.printf("BME Device ID: %d\n", DEVICE_ID);
   WiFi.begin(ssid, password);
   unsigned long startAttempt = millis();
   while (millis() - startAttempt < 20000) {
@@ -90,7 +88,6 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
   unsigned long currentMicros = micros();
-
   // LED hijau mati jika 2 detik telah berlalu sejak BME terkoneksi dengan host
   if (systemActive && !greenLedDone) {
     if (currentMillis - connectedMillis >= 2000) {
@@ -98,7 +95,6 @@ void loop() {
       greenLedDone = true;
     }
   }
-
   // BME melakukan koneksi dengan host
   if (systemActive && WiFi.status() != WL_CONNECTED) {
     if (lastDisconnectTime == 0) lastDisconnectTime = currentMillis;
@@ -106,10 +102,7 @@ void loop() {
         lastDisconnectTime = 0; 
         tryReconnect(); 
     }
-  } else {
-    lastDisconnectTime = 0; 
   }
-
   // BME mengirim data
   if (systemActive && WiFi.status() == WL_CONNECTED) {
     if (!client.connected()) {
@@ -131,18 +124,14 @@ void loop() {
         float notchedValue = Filter_BSF(hpfValue);
         float rectifiedValue = fabs(notchedValue); 
         filteredEnvelope = Filter_lowpass(rectifiedValue);
-        Serial.print(">Raw:");
-        Serial.println(rawValue);
-        Serial.print(">Notched:");
-        Serial.println(notchedValue);
-        Serial.print(">HighPassFiltered:");
-        Serial.println(hpfValue);
-        Serial.print(">LowPassFiltered:");
-        Serial.println(filteredEnvelope);
       }
-      if (currentMillis - previousSendMillis >= 20) {
+      if (currentMillis - previousSendMillis >= sendInterval) {
         previousSendMillis = currentMillis;
-        client.println(filteredEnvelope);
+        // FORMAT: E1:DATA atau E2:DATA
+        client.print("E");
+        client.print(DEVICE_ID);
+        client.print(":");
+        client.println(filteredEnvelope); 
       }
       if (currentMillis - lastBatteryMillis >= 1000) {
         lastBatteryMillis = currentMillis;
@@ -150,100 +139,72 @@ void loop() {
         for(int i = 0; i < 16; i++) Vsum += analogReadMilliVolts(batteryPin);
         float Vbattf = (2.0 * Vsum / 16.0) / 1000.0;
         int percentage = (int)(constrain((Vbattf - 3.2) * 100.0 / (4.2 - 3.2), 0, 100));
-        client.print("\nBAT:"); 
+        client.print("BAT");
+        client.print(DEVICE_ID);
+        client.print(":");
         client.println(percentage);
       }
     }
   }
 }
 
-// Fungsi Filter Lowpass
+// Fungsi Lowpass Filter
 float Filter_lowpass(float inputVal) {
-  for (int i = 3; i > 1; i--) {
-    x[i] = x[i - 1];
-    y[i] = y[i - 1];
-  }
+  for (int i = 3; i > 1; i--) { x[i] = x[i - 1]; y[i] = y[i - 1]; }
   x[1] = inputVal;
   y[1] = -a[2]*y[2] - a[3]*y[3] + b[1]*x[1] + b[2]*x[2] + b[3]*x[3];
   return y[1];
 }
 
-// Fungsi Filter Bandstop
+// Fungsi Bandstop Filter
 float Filter_BSF(float inputVal) {
-  for (int i = 4; i > 0; i--) {
-    x_bsf[i] = x_bsf[i - 1];
-    y_bsf[i] = y_bsf[i - 1];
-  }
+  for (int i = 4; i > 0; i--) { x_bsf[i] = x_bsf[i - 1]; y_bsf[i] = y_bsf[i - 1]; }
   x_bsf[0] = inputVal;
   y_bsf[0] = b_bsf[0]*x_bsf[0] + b_bsf[1]*x_bsf[1] + b_bsf[2]*x_bsf[2] + b_bsf[3]*x_bsf[3] + b_bsf[4]*x_bsf[4]
              - a_bsf[1]*y_bsf[1] - a_bsf[2]*y_bsf[2] - a_bsf[3]*y_bsf[3] - a_bsf[4]*y_bsf[4];
   return y_bsf[0];
 }
 
-// Fungsi Filter High Pass 20 Hz
+// Fungsi Highpass Filter
 float Filter_HPF(float inputVal) {
-  for (int i = 2; i > 0; i--) {
-    x_hpf[i] = x_hpf[i - 1];
-    y_hpf[i] = y_hpf[i - 1];
-  }
+  for (int i = 2; i > 0; i--) { x_hpf[i] = x_hpf[i - 1]; y_hpf[i] = y_hpf[i - 1]; }
   x_hpf[0] = inputVal;
-  y_hpf[0] = b_hpf[0]*x_hpf[0] + b_hpf[1]*x_hpf[1] + b_hpf[2]*x_hpf[2]
-             - a_hpf[1]*y_hpf[1] - a_hpf[2]*y_hpf[2];
+  y_hpf[0] = b_hpf[0]*x_hpf[0] + b_hpf[1]*x_hpf[1] + b_hpf[2]*x_hpf[2] - a_hpf[1]*y_hpf[1] - a_hpf[2]*y_hpf[2];
   return y_hpf[0];
 }
 
 // Fungsi Mengatur Warna LED RGB
 void setLED(int r, int g, int b) {
-  analogWrite(ledPin1, r);
-  analogWrite(ledPin2, g);
-  analogWrite(ledPin3, b);
+  analogWrite(ledPin1, r); analogWrite(ledPin2, g); analogWrite(ledPin3, b);
 }
 
 // Fungsi Mengatur Kondisi PMOSFET
 void updateMosfet(bool state) {
-  if (state) {
-    pinMode(PMOSPin, OUTPUT);
-    digitalWrite(PMOSPin, LOW); 
-  } else {
-    pinMode(PMOSPin, INPUT); 
-  }
+  if (state) { pinMode(PMOSPin, OUTPUT); digitalWrite(PMOSPin, LOW); }
+  else { pinMode(PMOSPin, INPUT); }
 }
 
 // Fungsi Mengatur Deep Sleep ESP32C6
 void goToSleep() {
-  Serial.println("\nMemasuki Deep Sleep");
-  setLED(0, 0, 0);
-  updateMosfet(false);
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  while(digitalRead(touchPin) == HIGH) { delay(10); }
-  delay(100); 
+  setLED(0, 0, 0); updateMosfet(false);
+  WiFi.disconnect(true); WiFi.mode(WIFI_OFF);
   rtc_gpio_init((gpio_num_t)GPIO_NUM_2);
   rtc_gpio_set_direction((gpio_num_t)GPIO_NUM_2, RTC_GPIO_MODE_INPUT_ONLY);
   rtc_gpio_pulldown_en((gpio_num_t)GPIO_NUM_2);
   esp_sleep_enable_ext1_wakeup(1ULL << GPIO_NUM_2, ESP_EXT1_WAKEUP_ANY_HIGH);
-  Serial.flush(); 
   esp_deep_sleep_start();
 }
 
+// Fungsi Mencoba Koneksi Kembali
 void tryReconnect() {
-  Serial.println("Koneksi host hilang. Mencari sinyal (20 detik maks) ...");
-  updateMosfet(false);
-  systemActive = false;
-  greenLedDone = false;
+  updateMosfet(false); systemActive = false; greenLedDone = false;
   unsigned long startAttempt = millis();
   while (millis() - startAttempt < 20000) {
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("Host terkoneksi kembali!");
-      systemActive = true;
-      connectedMillis = millis();
-      setLED(0, dimIntensity, 0);
-      delay(2500);
-      updateMosfet(true); 
+      systemActive = true; connectedMillis = millis();
+      setLED(0, dimIntensity, 0); delay(2500); updateMosfet(true); 
       return; 
     }
-    if ((millis() / 1000) % 2 == 0) setLED(0, 0, dimIntensity);
-    else setLED(0, 0, 0);
     delay(100);
   }
   goToSleep();
