@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PENGATURAN WARNA LED"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="12dp"
+            android:textColor="#000000"/>
+
+        <!-- MENU DROPDOWN PILIH ESP -->
+        <Spinner
+            android:id="@+id/spnEspSelect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            android:background="#EEEEEE"
+            android:padding="8dp"/>
+
+        <!-- WARNA MENCARI HOST -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Warna Saat Mencari Host (Blinking)"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvSrchR" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Red: 0" android:textColor="#FF0000"/>
+        <SeekBar android:id="@+id/sbSrchR" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#FF0000" android:thumbTint="#FF0000" android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvSrchG" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Green: 0" android:textColor="#00FF00"/>
+        <SeekBar android:id="@+id/sbSrchG" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#00FF00" android:thumbTint="#00FF00" android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvSrchB" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Blue: 0" android:textColor="#0000FF"/>
+        <SeekBar android:id="@+id/sbSrchB" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#0000FF" android:thumbTint="#0000FF" android:layout_marginBottom="24dp"/>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#CCCCCC" android:layout_marginBottom="24dp"/>
+
+        <!-- WARNA SUDAH TERKONEKSI -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Warna Saat Sudah Terkoneksi (Solid)"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvConnR" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Red: 0" android:textColor="#FF0000"/>
+        <SeekBar android:id="@+id/sbConnR" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#FF0000" android:thumbTint="#FF0000" android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvConnG" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Green: 0" android:textColor="#00FF00"/>
+        <SeekBar android:id="@+id/sbConnG" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#00FF00" android:thumbTint="#00FF00" android:layout_marginBottom="8dp"/>
+
+        <TextView android:id="@+id/tvConnB" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Blue: 0" android:textColor="#0000FF"/>
+        <SeekBar android:id="@+id/sbConnB" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#0000FF" android:thumbTint="#0000FF" android:layout_marginBottom="24dp"/>
+
+    </LinearLayout>
+</ScrollView>
