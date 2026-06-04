@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#FFFFFF">
+
+    <Button
+        android:id="@+id/btnStartServer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="#002333"
+        android:textColor="#FFFFFF"
+        android:layout_marginTop="24dp"
+        android:text="Start Server (Port 8080)" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:id="@+id/tvBattery1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Bat 1: Menunggu..."
+            android:textColor="#FF0000"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <TextView
+            android:id="@+id/tvBattery2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Bat 2: Menunggu..."
+            android:textColor="#0000FF"
+            android:textStyle="bold"
+            android:gravity="center" />
+    </LinearLayout>
+
+    <!-- PENGATURAN Y-AXIS (RANGE NILAI) -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Plotter Y-Axis Range"
+        android:textColor="#000000"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp"/>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="12dp">
+        <EditText
+            android:id="@+id/etMinPlot"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Min (0)"
+            android:inputType="numberDecimal"
+            android:textSize="14sp"/>
+        <EditText
+            android:id="@+id/etMaxPlot"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Max (250)"
+            android:inputType="numberDecimal"
+            android:textSize="14sp"/>
+        <Button
+            android:id="@+id/btnSetRange"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SET Y"
+            android:backgroundTint="#002333"
+            android:textSize="12sp"/>
+    </LinearLayout>
+
+    <!-- PENGATURAN X-AXIS (PANJANG KAMERA) -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Panjang Kamera (X-Axis)"
+        android:textColor="#000000"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp"/>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="24dp">
+        <EditText
+            android:id="@+id/etCameraLength"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Default: 100"
+            android:inputType="number"
+            android:textSize="14sp"/>
+        <Button
+            android:id="@+id/btnSetCamera"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SET KAMERA"
+            android:backgroundTint="#002333"
+            android:textSize="12sp"/>
+    </LinearLayout>
+
+    <!-- 3 SLIDER PWM -->
+    <TextView android:id="@+id/tvBrightness1" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="LED 1 (PWM): 0" android:textColor="#000000" android:textStyle="bold" />
+    <SeekBar android:id="@+id/sbBrightness1" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#FF0000" android:thumbTint="#FF0000" android:layout_marginBottom="12dp"/>
+
+    <TextView android:id="@+id/tvBrightness2" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="LED 2 (PWM): 0" android:textColor="#000000" android:textStyle="bold" />
+    <SeekBar android:id="@+id/sbBrightness2" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#00FF00" android:thumbTint="#00FF00" android:layout_marginBottom="12dp"/>
+
+    <TextView android:id="@+id/tvBrightness3" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="LED 3 (PWM): 0" android:textColor="#000000" android:textStyle="bold" />
+    <SeekBar android:id="@+id/sbBrightness3" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="255" android:progressTint="#0000FF" android:thumbTint="#0000FF" android:layout_marginBottom="12dp"/>
+</LinearLayout>
