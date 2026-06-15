@@ -27,6 +27,22 @@ csv_filename = "semg_data_log.csv"
 # Kunci (Lock) untuk mengamankan sinkronisasi variabel antar thread
 data_lock = threading.Lock()
 
+# Variabel Global untuk Real-time Timer (Khusus Tampilan UI)
+record_start_time = 0.0
+total_pause_time = 0.0
+pause_start_time = 0.0
+
+# =============================================================
+# FUNGSI WAKTU REAL-TIME (KHUSUS UI)
+# =============================================================
+def get_real_duration():
+    global is_recording, is_paused, record_start_time, pause_start_time, total_pause_time
+    if not is_recording:
+        return 0.0
+    if is_paused:
+        return pause_start_time - record_start_time - total_pause_time
+    return time.time() - record_start_time - total_pause_time
+
 # =============================================================
 # FUNGSI EKSTRAKSI FITUR
 # =============================================================
@@ -98,15 +114,14 @@ def tcp_server_thread():
                         
                     voltages = [float(v) for v in vals_str.split(",") if v]
                     
-                    # Terapkan Data Lock agar tidak bentrok dengan tombol Pause/Mode
                     with data_lock:
                         for v in voltages:
                             raw_signal_window.append(v)
                             
                             if is_recording and not is_paused:
+                                # Waktu absolut berbasis sampel untuk akurasi data & spektrum
                                 ts_actual = len(raw_signal_buffer) / SAMPLING_FREQ 
                                 
-                                # Logika 30 detik ditempatkan di sini agar akurasi pergantian label 100% absolut 
                                 if current_label == 0 and ts_actual >= 30.0:
                                     current_label = 1
                                 
@@ -121,7 +136,7 @@ def tcp_server_thread():
                                         
                                         with open(csv_filename, 'a', newline='') as f:
                                             writer = csv.writer(f)
-                                            row = [subject_name, ts_actual, current_label]
+                                            row = [subject_name, f"{ts_actual:.4f}", current_label]
                                             row.extend([f"{feat:.4f}" for feat in features])
                                             writer.writerow(row)
                                     except Exception as ex:
@@ -138,18 +153,19 @@ def tcp_server_thread():
     server_socket.close()
 
 # =============================================================
-# FUNGSI PEMBARUAN COUNTER (SINKRON DENGAN BUFFER DATA)
+# FUNGSI PEMBARUAN COUNTER (SINKRON UI REAL-TIME)
 # =============================================================
 def update_plot(frame):
-    # Hanya membaca nilai dengan aman
     with data_lock:
         local_is_recording = is_recording
         local_is_paused = is_paused
         local_label = current_label
-        local_durasi = len(raw_signal_buffer) / SAMPLING_FREQ
+
+    # UI menggunakan waktu komputer agar mulus
+    current_real_time = get_real_duration()
 
     if local_is_recording:
-        counter_text.set_text(f"DURASI PEREKAMAN : {local_durasi:.1f} s")
+        counter_text.set_text(f"DURASI PEREKAMAN : {current_real_time:.1f} s")
         label_names = {-1: "[ STANDBY ]", 0: "[ BASELINE ]", 1: "[ CONTRACTION ]", 2: "[ FATIGUE ]"}
         pause_status = " (PAUSED)" if local_is_paused else ""
         status_text.set_text(f"STATUS UTAMA: {label_names[local_label]}{pause_status}")
@@ -169,6 +185,8 @@ def on_press(event):
                 globals()['is_recording'] = True
                 globals()['is_paused'] = False
                 globals()['current_label'] = 0
+                globals()['record_start_time'] = time.time()
+                globals()['total_pause_time'] = 0.0
                 raw_signal_buffer.clear()
                 label_list.clear()
                 feature_calc_buffer.clear()
@@ -184,10 +202,12 @@ def on_press(event):
         with data_lock:
             globals()['is_paused'] = not is_paused
             paused_state = globals()['is_paused']
-        if paused_state:
-            print("[*] Perekaman DIHENTIKAN SEMENTARA (Pause).")
-        else:
-            print("[*] Perekaman DILANJUTKAN (Resume).")
+            if paused_state:
+                globals()['pause_start_time'] = time.time()
+                print("[*] Perekaman DIHENTIKAN SEMENTARA (Pause).")
+            else:
+                globals()['total_pause_time'] += (time.time() - globals()['pause_start_time'])
+                print("[*] Perekaman DILANJUTKAN (Resume).")
         
     elif key == '4':
         is_running = False
@@ -206,6 +226,10 @@ while True:
         is_running = True
         is_paused = False 
         label_list = []
+        
+        record_start_time = 0.0
+        total_pause_time = 0.0
+        pause_start_time = 0.0
 
     file_exists = os.path.isfile(csv_filename)
 
@@ -316,7 +340,8 @@ while True:
                 ax_spec.set_title("Analisis Spektrum sEMG - Gabungan Komplit")
 
             ax_spec.set_xlabel("Frekuensi (Hz)")
-            ax_spec.set_ylabel("Power Spectral Density (PSD)")
+            # Sumbu vertikal dipastikan berlabel PSD dan satuannya
+            ax_spec.set_ylabel("Power Spectral Density (V²/Hz)")
             ax_spec.set_xlim(0, 500)
             ax_spec.legend()
             ax_spec.grid(True)
