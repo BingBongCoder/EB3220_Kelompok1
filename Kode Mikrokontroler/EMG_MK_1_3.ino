@@ -50,6 +50,8 @@ int cnB = 0;
 bool syncSent = false; 
 
 float smoothedVbatt = -1.0; 
+const float V_BATT_MIN = 3.30f; // Voltase saat 0%
+const float V_BATT_MAX = 4.03f; // Voltase saat 100% (sesuai hasil pengukuranmu)
 bool systemActive = false;
 bool greenLedDone = false;
 unsigned long connectedMillis = 0;
@@ -151,23 +153,33 @@ void loop() {
     unsigned long currentMicros = micros();
 
     // PEMBACAAN BATERAI PER 1 DETIK
-    if (currentMillis - lastBatteryMillis >= 1000) {
-        lastBatteryMillis = currentMillis;
+if (currentMillis - lastBatteryMillis >= 1000) {
+    lastBatteryMillis = currentMillis;
+    
+    // 1. Baca ADC dan konversi ke tegangan (2.0f adalah pengali dari voltage divider)
+    float rawADC = (float)analogRead(batteryPin);
+    float currentVbatt = (2.0f * (rawADC / 4095.0f) * 3.3f);
+    
+    // 2. Low Pass Filter (Smooth)
+    smoothedVbatt = (0.9f * smoothedVbatt) + (0.1f * currentVbatt);
+    
+    if (systemActive && WiFi.status() == WL_CONNECTED && client.connected()) {
         
-        // Hardening: Menggunakan float explisit 'f'
-        float currentVbatt = (2.0f * ((float)analogRead(batteryPin) / 4095.0f) * 3.3f);
-        smoothedVbatt = (0.9f * smoothedVbatt) + (0.1f * currentVbatt);
+        // 3. Menghitung persentase berdasarkan range custom
+        // Rumus: ((V_sekarang - V_min) / (V_max - V_min)) * 100
+        float range = V_BATT_MAX - V_BATT_MIN;
+        float percentage = ((smoothedVbatt - V_BATT_MIN) / range) * 100.0f;
         
-        if (systemActive && WiFi.status() == WL_CONNECTED && client.connected()) {
-            // Hardening: Pastikan constrain membaca rentang float dengan aman sebelum dicast ke int
-            int percentage = (int)constrain(((smoothedVbatt - 3.2f) * 100.0f) / 1.0f, 0.0f, 100.0f);
-            
-            client.print("B"); 
-            client.print(DEVICE_ID);
-            client.print(":");
-            client.println(percentage);
-        }
+        // 4. Constrain agar tidak di bawah 0% atau di atas 100%
+        int finalPercentage = (int)constrain(percentage, 0.0f, 100.0f);
+        
+        // Kirim ke client
+        client.print("B"); 
+        client.print(DEVICE_ID);
+        client.print(":");
+        client.println(finalPercentage);
     }
+}
 
     if (systemActive && !greenLedDone) {
         if (currentMillis - connectedMillis >= 2000) {
