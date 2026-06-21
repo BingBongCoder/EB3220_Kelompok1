@@ -3,15 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.esptest"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    namespace = "com.example.bme"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.esptest"
+        applicationId = "com.example.bme"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
@@ -36,14 +32,24 @@ android {
 }
 
 dependencies {
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.activity)
-    implementation(libs.androidx.constraintlayout)
+    // Library Dasar
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.9.0")
+    
+    // UI Components
+    implementation("androidx.activity:activity-ktx:1.8.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.cardview:cardview:1.0.0") // Penambahan untuk desain baru
+
+    // Library Grafik
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
+
+    // Library FFT
+    implementation("com.github.wendykierp:JTransforms:3.1")
+
+    // Testing
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
