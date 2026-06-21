@@ -18,7 +18,7 @@
             android:layout_height="60dp"
             android:layout_marginBottom="16dp"
             android:backgroundTint="#BB86FC"
-            android:text="START SERVER (PORT 8080)"
+            android:text="Hubungkan ke BME"
             android:textColor="#000000"
             android:textSize="16sp"
             android:textStyle="bold"
@@ -82,7 +82,7 @@
                 android:hint="Min"
                 android:textColorHint="#757575"
                 android:textColor="#FFFFFF"
-                android:inputType="numberDecimal" />
+                android:inputType="numberSigned|numberDecimal" />
 
             <EditText
                 android:id="@+id/etMaxPlot"
@@ -92,7 +92,7 @@
                 android:hint="Max"
                 android:textColorHint="#757575"
                 android:textColor="#FFFFFF"
-                android:inputType="numberDecimal" />
+                android:inputType="numberSigned|numberDecimal" />
 
             <Button
                 android:id="@+id/btnSetRange"
