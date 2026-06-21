@@ -1,468 +1,329 @@
-package com.example.bme // Sesuaikan dengan package-mu
+// Body Muscle Evaluator (BME)
+// Dibuat oleh
+// Michael Liebing / 18323016
+// Jonathan Otto / 18323017
+// Jerry Alexander Tjoa / 18323026
+// Sarjana Teknik Biomedis
+// Sekolah Teknik Elektro dan Informatika Rekayasa
+// Institut Teknologi Bandung
 
-import android.graphics.Color
-import android.os.Bundle
-import android.view.View
-import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import com.github.mikephil.charting.charts.LineChart
-import com.github.mikephil.charting.components.AxisBase
-import com.github.mikephil.charting.data.Entry
-import com.github.mikephil.charting.data.LineData
-import com.github.mikephil.charting.data.LineDataSet
-import com.github.mikephil.charting.formatter.ValueFormatter
-import com.google.android.material.bottomnavigation.BottomNavigationView
-import kotlinx.coroutines.*
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.ServerSocket
-import java.net.Socket
-import java.util.concurrent.CopyOnWriteArrayList
+// Library
+#include <Arduino.h>
+#include <WiFi.h>
+#include <driver/rtc_io.h>
+#include <Preferences.h>
 
-class MainActivity : AppCompatActivity() {
+// Deklarasi Pin
+const int batteryPin = A0; 
+const int EMGPin = A1;     
+const int ledPin1 = D8;    
+const int ledPin2 = D9;    
+const int ledPin3 = D10;   
+const int PMOSPin = D5;    
+const int LDO_EN_Pin = D7; 
+const int touchPin = D2; 
 
-    private val connectedClients = CopyOnWriteArrayList<Socket>()
-    private var serverJob: Job? = null
-    private val PORT = 8080
+// Variabel Wifi
+const int DEVICE_ID = 1;
+const char* ssid = "BMEhost";
+const char* password = "BMEhosting";
+const uint16_t port = 8080;
+const float wifiTimeoutSeconds = 30.0;
+const unsigned long wifiTimeoutMs = (unsigned long)(wifiTimeoutSeconds * 1000);
+WiFiClient client;
 
-    // Data Grafik
-    private val entries1 = ArrayList<Entry>()
-    private val entries2 = ArrayList<Entry>()
-    private lateinit var lineDataSet1: LineDataSet
-    private lateinit var lineDataSet2: LineDataSet
-    private var timeIndex1 = 0f
-    private var timeIndex2 = 0f
+// Variabel Sistem
+Preferences pref;
+int srR = 0, srG = 0, srB = 12; 
+int cnR = 0, cnG = 12, cnB = 0; 
+bool syncSent = false; 
+float smoothedVbatt = -1.0; 
+const float V_BATT_MIN = 3.30f; 
+const float V_BATT_MAX = 4.03f; 
+bool systemActive = false;
+bool greenLedDone = false;
+unsigned long connectedMillis = 0;
+unsigned long lastBatteryMillis = 0;
+unsigned long lastDisconnectTime = 0; 
+const int dimIntensity = 12;
 
-    // Optimasi Sinyal EMG (2500 Hz)
-    private var updateCounter = 0
-    private var cameraLength = 25000f
-    private var maxBuffer = 30000
-    private var isFullScreen = false
+// Variabel Sinyal EMG
+const float samplingFrequency = 2500.0;
+const int PACKET_SIZE = 50; 
+float emgBuffer[PACKET_SIZE];
+float rectBuffer[PACKET_SIZE]; // Buffer untuk Rectified EMG
+int bufferIndex = 0;
+const unsigned long intervalMicros = (unsigned long)(1000000.0 / samplingFrequency);
+unsigned long previousMicros = 0;
+const int emg_offset = 2022;
 
-    // HIDE SPIKE LOGIC
-    private var mosfetOnTime: Long = 0
-    private val SPIKE_IGNORE_DURATION = 500L
+// Variabel Filter
+float x_lpf[3], y_lpf[3], x_hpf[3], y_hpf[3];
+const float b_lpf[3] = {0.2065720838f, 0.4131441677f, 0.2065720838f};
+const float a_lpf[3] = {1.0000000000f, -0.3695273774f, 0.1958157127f};
+const float b_hpf[3] = {0.9650809863f, -1.9301619727f, 0.9650809863f};
+const float a_hpf[3] = {1.0000000000f, -1.9289422633f, 0.9313816821f};
 
-    // Memori Sinkronisasi Warna LED
-    private var esp1Colors = intArrayOf(0, 0, 0, 0, 0, 0)
-    private var esp2Colors = intArrayOf(0, 0, 0, 0, 0, 0)
+// Deklarasi Fungsi
+void setLED(int r, int g, int b);
+void updateAnalogPower(bool state);
+void goToSleep();
+void tryReconnect();
+float Filter_LPF(float inputVal);
+float Filter_HPF(float inputVal);
 
-    private lateinit var layoutHome: View
-    private lateinit var layoutPlot: View
-    private lateinit var layoutSettings: View
-
-    private lateinit var tvBattery1: TextView
-    private lateinit var tvBattery2: TextView
-    private lateinit var btnStartServer: Button
-    private lateinit var tvConsole: TextView
-    private lateinit var lineChart: LineChart
-    private lateinit var swViewMode: Switch
-    private lateinit var rgPlotSelect: RadioGroup
-    private lateinit var rlChartContainer: RelativeLayout
-    private lateinit var svConsole: ScrollView
-    private lateinit var btnFullScreen: Button
-    private lateinit var spnEspSelect: Spinner
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        supportActionBar?.hide()
-        window.statusBarColor = Color.parseColor("#121212")
-        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = false
-        setContentView(R.layout.activity_main)
-
-        val container = findViewById<FrameLayout>(R.id.fragment_container)
-
-        ViewCompat.setOnApplyWindowInsetsListener(container) { view, insets ->
-            val statusBar = insets.getInsets(WindowInsetsCompat.Type.statusBars())
-            view.setPadding(view.paddingLeft, statusBar.top, view.paddingRight, view.paddingBottom)
-            insets
+// Fungsi Setup
+void setup() 
+{
+    Serial.begin(115200);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    pinMode(ledPin1, OUTPUT); 
+    pinMode(ledPin2, OUTPUT); 
+    pinMode(ledPin3, OUTPUT);
+    pinMode(touchPin, INPUT); 
+    pinMode(PMOSPin, OUTPUT); 
+    pinMode(LDO_EN_Pin, OUTPUT);
+    updateAnalogPower(false);
+    pref.begin("bme_cfg", false);
+    srR = pref.getInt("srR", 0); 
+    srG = pref.getInt("srG", 0); 
+    srB = pref.getInt("srB", dimIntensity);
+    cnR = pref.getInt("cnR", 0); 
+    cnG = pref.getInt("cnG", 12); 
+    cnB = pref.getInt("cnB", 0);
+    uint32_t initVsum = 0;
+    for(int i = 0; i < 100; i++) 
+    { 
+        initVsum += analogRead(batteryPin); 
+        delay(1);
+    }
+    smoothedVbatt = (2.0f * ((float)initVsum / 100.0f) / 4095.0f) * 3.3f;
+    WiFi.begin(ssid, password);
+    unsigned long startAttempt = millis();
+    while (millis() - startAttempt < wifiTimeoutMs) 
+    {
+        if (WiFi.status() == WL_CONNECTED) 
+        {
+            systemActive = true; 
+            connectedMillis = millis(); 
+            setLED(cnR, cnG, cnB); 
+            delay(2500); 
+            return; 
         }
+        ((millis() / 1000) % 2 == 0) ? setLED(srR, srG, srB) : setLED(0, 0, 0);
+        delay(100);
+    }
+    goToSleep();
+}
 
-        val bottomNav = findViewById<BottomNavigationView>(R.id.bottom_navigation)
-
-        layoutHome = layoutInflater.inflate(R.layout.layout_home, null)
-        layoutPlot = layoutInflater.inflate(R.layout.layout_plot, null)
-        layoutSettings = layoutInflater.inflate(R.layout.layout_settings, null)
-
-        container.addView(layoutHome)
-        container.addView(layoutPlot)
-        container.addView(layoutSettings)
-
-        setupHomeUI()
-        setupPlotUI()
-        setupSettingsUI()
-        showTab("home")
-
-        bottomNav.setOnItemSelectedListener { item ->
-            when (item.itemId) {
-                R.id.nav_home -> {
-                    showTab("home")
-                    sendCommandToAll("MOS:0")
-                    true
-                }
-                R.id.nav_plot -> {
-                    showTab("plot")
-                    sendCommandToAll("MOS:1")
-                    mosfetOnTime = System.currentTimeMillis()
-                    true
-                }
-                R.id.nav_settings -> {
-                    showTab("settings")
-                    sendCommandToAll("MOS:0")
-                    true
-                }
-                else -> false
-            }
-        }
-
-        // Memulai server secara otomatis di latar belakang untuk bersiaga
-        if (serverJob == null || serverJob?.isActive == false) {
-            startServer()
+// Fungsi Loop
+void loop()
+{
+    unsigned long currentMillis = millis();
+    unsigned long currentMicros = micros();
+    if (currentMillis - lastBatteryMillis >= 1000) 
+    {
+        lastBatteryMillis = currentMillis;
+        float rawADC = (float)analogRead(batteryPin);
+        float currentVbatt = (2.0f * (rawADC / 4095.0f) * 3.3f);
+        smoothedVbatt = (0.9f * smoothedVbatt) + (0.1f * currentVbatt);
+        if (systemActive && WiFi.status() == WL_CONNECTED && client.connected()) {
+            int percentage = (int)constrain(((smoothedVbatt - V_BATT_MIN) / (V_BATT_MAX - V_BATT_MIN)) * 100.0f, 0.0f, 100.0f);
+            client.print("B"); 
+            client.print(DEVICE_ID); 
+            client.print(":"); 
+            client.println(percentage);
         }
     }
-
-    private fun showTab(tab: String) {
-        layoutHome.visibility = if (tab == "home") View.VISIBLE else View.GONE
-        layoutPlot.visibility = if (tab == "plot") View.VISIBLE else View.GONE
-        layoutSettings.visibility = if (tab == "settings") View.VISIBLE else View.GONE
+    if (systemActive && !greenLedDone && currentMillis - connectedMillis >= 2000) 
+    {
+        setLED(0, 0, 0); 
+        greenLedDone = true;
     }
-
-    private fun setupHomeUI() {
-        btnStartServer = layoutHome.findViewById(R.id.btnStartServer)
-        tvBattery1 = layoutHome.findViewById(R.id.tvBattery1)
-        tvBattery2 = layoutHome.findViewById(R.id.tvBattery2) ?: tvBattery1
-
-        val etCamera = layoutHome.findViewById<EditText>(R.id.etCameraLength)
-
-        layoutHome.findViewById<Button>(R.id.btnSetRange)?.setOnClickListener {
-            val minV = layoutHome.findViewById<EditText>(R.id.etMinPlot).text.toString().toIntOrNull() ?: 0
-            val maxV = layoutHome.findViewById<EditText>(R.id.etMaxPlot).text.toString().toIntOrNull() ?: 3500
-
-            if (maxV > minV) {
-                lineChart.axisLeft.axisMinimum = minV.toFloat()
-                lineChart.axisLeft.axisMaximum = maxV.toFloat()
-                lineChart.invalidate()
-                Toast.makeText(this, "Rentang magnitudo diubah: $minV - $maxV mV", Toast.LENGTH_SHORT).show()
-            }
+    if (systemActive && WiFi.status() != WL_CONNECTED) 
+    {
+        updateAnalogPower(false); 
+        if (lastDisconnectTime == 0) 
+        {
+            lastDisconnectTime = currentMillis;
         }
-
-        layoutHome.findViewById<Button>(R.id.btnSetCamera)?.setOnClickListener {
-            val newCamSeconds = etCamera?.text.toString().toIntOrNull()
-
-            if (newCamSeconds != null && newCamSeconds > 0) {
-                cameraLength = (newCamSeconds * 2500).toFloat()
-                maxBuffer = maxOf((cameraLength * 1.2f).toInt(), 5000)
-
-                lineChart.setVisibleXRangeMaximum(cameraLength)
-                lineChart.setVisibleXRangeMinimum(cameraLength)
-
-                val maxTime = maxOf(timeIndex1, timeIndex2)
-                val scrollTarget = if (maxTime > cameraLength) maxTime - cameraLength else 0f
-                lineChart.moveViewToX(scrollTarget)
-                lineChart.invalidate()
-
-                Toast.makeText(this, "Lebar kamera diatur ke $newCamSeconds detik", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        // =========================================================
-        // PERUBAHAN LOGIKA TOMBOL CONNECT
-        // =========================================================
-        btnStartServer.setOnClickListener {
-            if (connectedClients.isNotEmpty()) {
-                btnStartServer.text = "BME Connected"
-                btnStartServer.isEnabled = false
-            } else {
-                Toast.makeText(this, "Belum ada BME yang terhubung dengan Hotspot HP", Toast.LENGTH_SHORT).show()
-                if (serverJob == null || serverJob?.isActive == false) {
-                    startServer()
-                }
-            }
-        }
-
-        val sliders = arrayOf(R.id.sbBrightness1, R.id.sbBrightness2, R.id.sbBrightness3)
-        val texts = arrayOf(R.id.tvBrightness1, R.id.tvBrightness2, R.id.tvBrightness3)
-        val colorLabels = arrayOf("LED Merah (R)", "LED Hijau (G)", "LED Biru (B)")
-        val pwmCommands = arrayOf("PWM1", "PWM2", "PWM3")
-
-        for (i in 0..2) {
-            val sb = layoutHome.findViewById<SeekBar>(sliders[i])
-            val tv = layoutHome.findViewById<TextView>(texts[i])
-
-            sb?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
-                    tv?.text = "${colorLabels[i]}: $p"
-                }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {
-                    sendCommandToAll("${pwmCommands[i]}:${s?.progress ?: 0}")
-                }
-            })
+        if (currentMillis - lastDisconnectTime > 3000) 
+        {
+            lastDisconnectTime = 0; tryReconnect();
         }
     }
-
-    private fun setupSettingsUI() {
-        spnEspSelect = layoutSettings.findViewById(R.id.spnEspSelect)
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, arrayOf("Target: Konfigurasi ESP 1", "Target: Konfigurasi ESP 2"))
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spnEspSelect.adapter = adapter
-
-        spnEspSelect.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                updateSlidersFromMemory(position + 1)
+    if (systemActive && WiFi.status() == WL_CONNECTED) 
+    {
+        if (!client.connected()) 
+        {
+            updateAnalogPower(false); 
+            client.connect(WiFi.gatewayIP(), port); syncSent = false;
+        } 
+        else 
+        {
+            if (!syncSent) 
+            {
+                client.printf("SYNC%d:%d,%d,%d,%d,%d,%d\n", DEVICE_ID, srR, srG, srB, cnR, cnG, cnB);
+                syncSent = true;
             }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        val sliderIds = arrayOf(R.id.sbSrchR, R.id.sbSrchG, R.id.sbSrchB, R.id.sbConnR, R.id.sbConnG, R.id.sbConnB)
-        val textIds = arrayOf(R.id.tvSrchR, R.id.tvSrchG, R.id.tvSrchB, R.id.tvConnR, R.id.tvConnG, R.id.tvConnB)
-        val colorNames = arrayOf("Red", "Green", "Blue", "Red", "Green", "Blue")
-        val commands = arrayOf("SR_R", "SR_G", "SR_B", "CN_R", "CN_G", "CN_B")
-
-        for (i in 0..5) {
-            val sb = layoutSettings.findViewById<SeekBar>(sliderIds[i])
-            val tv = layoutSettings.findViewById<TextView>(textIds[i])
-            sb?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                    tv?.text = "${colorNames[i]}: $p"
-                    if (fromUser) {
-                        val espId = spnEspSelect.selectedItemPosition + 1
-                        if (espId == 1) esp1Colors[i] = p else esp2Colors[i] = p
+            static String requestBuffer = "";
+            while (client.available() > 0) 
+            {
+                char c = client.read();
+                if (c == '\n') {
+                    requestBuffer.trim();
+                    if (requestBuffer.startsWith("MOS:1")) 
+                    {
+                        updateAnalogPower(true);
                     }
-                }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {
-                    val espId = spnEspSelect.selectedItemPosition + 1
-                    sendCommandToAll("${espId}_${commands[i]}:${s?.progress ?: 0}")
-                }
-            })
-        }
-
-        val swFatigueMode = layoutSettings.findViewById<Switch>(R.id.swFatigueMode)
-        swFatigueMode?.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                Toast.makeText(this, "Fatigue Mode: ON", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "Fatigue Mode: OFF", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun updateSlidersFromMemory(espId: Int) {
-        val colors = if (espId == 1) esp1Colors else esp2Colors
-        val sliderIds = arrayOf(R.id.sbSrchR, R.id.sbSrchG, R.id.sbSrchB, R.id.sbConnR, R.id.sbConnG, R.id.sbConnB)
-        for (i in 0..5) {
-            val sb = layoutSettings.findViewById<SeekBar>(sliderIds[i])
-            sb?.progress = colors[i]
-        }
-    }
-
-    private fun syncColorsFromESP(espId: Int, data: String) {
-        val parts = data.split(",")
-        if (parts.size == 6) {
-            val colors = if (espId == 1) esp1Colors else esp2Colors
-            for (i in 0..5) colors[i] = parts[i].trim().toIntOrNull() ?: 0
-
-            runOnUiThread {
-                if (spnEspSelect.selectedItemPosition + 1 == espId) {
-                    updateSlidersFromMemory(espId)
-                }
-            }
-        }
-    }
-
-    private fun setupPlotUI() {
-        tvConsole = layoutPlot.findViewById(R.id.tvConsole)
-        lineChart = layoutPlot.findViewById(R.id.lineChart)
-        swViewMode = layoutPlot.findViewById(R.id.swViewMode)
-        rgPlotSelect = layoutPlot.findViewById(R.id.rgPlotSelect)
-        rlChartContainer = layoutPlot.findViewById(R.id.rlChartContainer)
-        svConsole = layoutPlot.findViewById(R.id.svConsole)
-        btnFullScreen = layoutPlot.findViewById(R.id.btnFullScreen)
-
-        swViewMode.setOnCheckedChangeListener { _, isChecked ->
-            rlChartContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
-            svConsole.visibility = if (isChecked) View.GONE else View.VISIBLE
-        }
-
-        btnFullScreen.setOnClickListener {
-            isFullScreen = !isFullScreen
-            val bottomNav = findViewById<BottomNavigationView>(R.id.bottom_navigation)
-            if (isFullScreen) {
-                supportActionBar?.hide(); bottomNav.visibility = View.GONE; swViewMode.visibility = View.GONE; rgPlotSelect.visibility = View.GONE
-                btnFullScreen.text = "EXIT FULL SCREEN"
-                window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
-            } else {
-                supportActionBar?.show(); bottomNav.visibility = View.VISIBLE; swViewMode.visibility = View.VISIBLE; rgPlotSelect.visibility = View.VISIBLE
-                btnFullScreen.text = "[ ] FULL SCREEN"
-                window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
-            }
-        }
-
-        if (entries1.isEmpty()) entries1.add(Entry(timeIndex1++, 0f))
-        if (entries2.isEmpty()) entries2.add(Entry(timeIndex2++, 0f))
-
-        lineDataSet1 = LineDataSet(entries1, "ESP 1").apply { color = Color.RED; setDrawCircles(false); setDrawValues(false); lineWidth = 1.5f }
-        lineDataSet2 = LineDataSet(entries2, "ESP 2").apply { color = Color.BLUE; setDrawCircles(false); setDrawValues(false); lineWidth = 1.5f }
-
-        lineChart.data = LineData(lineDataSet1, lineDataSet2)
-        lineChart.description.isEnabled = false
-        lineChart.axisRight.isEnabled = false
-        lineChart.axisLeft.axisMinimum = 0f
-        lineChart.axisLeft.axisMaximum = 3500f
-
-        lineChart.xAxis.textColor = Color.WHITE
-        lineChart.axisLeft.textColor = Color.WHITE
-        lineChart.legend.textColor = Color.WHITE
-
-        lineChart.xAxis.valueFormatter = object : ValueFormatter() {
-            override fun getAxisLabel(value: Float, axis: AxisBase?): String {
-                val timeInSeconds = value / 2500f
-                return String.format("%.1f s", timeInSeconds)
-            }
-        }
-
-        rgPlotSelect.setOnCheckedChangeListener { _, checkedId ->
-            when (checkedId) {
-                R.id.rbEsp1 -> { lineDataSet1.isVisible = true; lineDataSet2.isVisible = false }
-                R.id.rbEsp2 -> { lineDataSet1.isVisible = false; lineDataSet2.isVisible = true }
-                R.id.rbBoth -> { lineDataSet1.isVisible = true; lineDataSet2.isVisible = true }
-            }
-            lineChart.invalidate()
-        }
-    }
-
-    private fun sendCommandToAll(cmd: String) {
-        CoroutineScope(Dispatchers.IO).launch {
-            for (socket in connectedClients) {
-                try { if (socket.isConnected && !socket.isClosed) { socket.getOutputStream().write(("$cmd\n").toByteArray()); socket.getOutputStream().flush() } } catch (e: Exception) { }
-            }
-        }
-    }
-
-    private fun startServer() {
-        serverJob = CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val ss = ServerSocket(PORT)
-                withContext(Dispatchers.Main) { tvConsole.append("Server started...\n") }
-                while (isActive) {
-                    val client = ss.accept() // Ini akan menunggu sampai ESP terhubung
-                    connectedClients.add(client)
-
-                    // =========================================================
-                    // OTOMATIS MENGUBAH UI TOMBOL SAAT ESP BERHASIL MASUK
-                    // =========================================================
-                    withContext(Dispatchers.Main) {
-                        btnStartServer.text = "BME Connected"
-                        btnStartServer.isEnabled = false
+                    else if (requestBuffer.startsWith("MOS:0")) 
+                    {
+                        updateAnalogPower(false);
                     }
-
-                    launch {
-                        delay(500)
-                        val mosfetCmd = if (layoutPlot.visibility == View.VISIBLE) {
-                            mosfetOnTime = System.currentTimeMillis()
-                            "MOS:1\n"
-                        } else {
-                            "MOS:0\n"
-                        }
-                        try { client.getOutputStream().write(mosfetCmd.toByteArray()); client.getOutputStream().flush() } catch (e: Exception) {}
-                        readClientData(client)
+                    else if (requestBuffer.startsWith("PWM1:")) 
+                    {
+                        analogWrite(ledPin1, requestBuffer.substring(5).toInt());
                     }
-                }
-            } catch (e: Exception) { }
-        }
-    }
-
-    private suspend fun CoroutineScope.readClientData(client: Socket) {
-        try {
-            val reader = BufferedReader(InputStreamReader(client.inputStream))
-            while (isActive && client.isConnected) {
-                val line = reader.readLine() ?: break
-                withContext(Dispatchers.Main) {
-                    when {
-                        line.startsWith("B1:") -> tvBattery1.text = "Bat 1: ${line.substring(3).trim()}%"
-                        line.startsWith("B2:") -> tvBattery2.text = "Bat 2: ${line.substring(3).trim()}%"
-
-                        line.startsWith("E1:") -> updateChart(1, line.substring(3), line)
-                        line.startsWith("E2:") -> updateChart(2, line.substring(3), line)
-                        line.startsWith("SYNC1:") -> syncColorsFromESP(1, line.substring(6))
-                        line.startsWith("SYNC2:") -> syncColorsFromESP(2, line.substring(6))
-                        else -> { if (layoutPlot.visibility == View.VISIBLE && !swViewMode.isChecked) tvConsole.append("Unknown: $line\n") }
+                    else if (requestBuffer.startsWith("PWM2:")) 
+                    {
+                        analogWrite(ledPin2, requestBuffer.substring(5).toInt());
                     }
-                }
+                    else if (requestBuffer.startsWith("PWM3:")) 
+                    {
+                        analogWrite(ledPin3, requestBuffer.substring(5).toInt());
+                    }
+                    else if (requestBuffer.startsWith("1_SR_R:")) 
+                    { 
+                        srR = requestBuffer.substring(7).toInt(); 
+                        pref.putInt("srR", srR); 
+                    }
+                    else if (requestBuffer.startsWith("1_SR_G:")) 
+                    {
+                        srG = requestBuffer.substring(7).toInt();
+                        pref.putInt("srG", srG);
+                    }
+                    else if (requestBuffer.startsWith("1_SR_B:")) 
+                    {
+                        srB = requestBuffer.substring(7).toInt();
+                        pref.putInt("srB", srB);
+                    }
+                    else if (requestBuffer.startsWith("1_CN_R:")) 
+                    {
+                        cnR = requestBuffer.substring(7).toInt();
+                        pref.putInt("cnR", cnR);
+                    }
+                    else if (requestBuffer.startsWith("1_CN_G:")) 
+                    {
+                        cnG = requestBuffer.substring(7).toInt();
+                        pref.putInt("cnG", cnG);
+                    }
+                    else if (requestBuffer.startsWith("1_CN_B:")) 
+                    {
+                        cnB = requestBuffer.substring(7).toInt();
+                        pref.putInt("cnB", cnB);
+                    }
+                    requestBuffer = ""; 
+                } 
+                else 
+                {
+                    requestBuffer += c;
+                } 
             }
-        } catch (e: Exception) {
-        } finally {
-            connectedClients.remove(client)
-            client.close()
-
-            // =========================================================
-            // KEMBALIKAN TOMBOL JIKA KONEKSI TERPUTUS
-            // =========================================================
-            withContext(Dispatchers.Main) {
-                if (connectedClients.isEmpty()) {
-                    btnStartServer.text = "Connect to BME"
-                    btnStartServer.isEnabled = true
+            if (currentMicros - previousMicros >= intervalMicros) 
+            {
+                previousMicros += intervalMicros;
+                int rawValue = analogRead(EMGPin);
+                int centeredValue = rawValue - emg_offset;
+                float hpfValue = Filter_HPF((float)centeredValue);
+                float lpfValue = Filter_LPF(hpfValue); 
+                float emgMV = (lpfValue / 4095.0f) * 3300.0f;
+                float emgRect = abs(emgMV);
+                if (bufferIndex < PACKET_SIZE) 
+                {
+                    emgBuffer[bufferIndex] = emgMV;
+                    rectBuffer[bufferIndex] = emgRect;
+                    bufferIndex++;
+                }
+                if (bufferIndex >= PACKET_SIZE) 
+                {
+                    char packetE[400];
+                    char packetR[400];
+                    int lenE = sprintf(packetE, "E%d:", DEVICE_ID);
+                    int lenR = sprintf(packetR, "R%d:", DEVICE_ID);
+                    for (int i = 0; i < PACKET_SIZE; i++) {
+                        lenE += sprintf(packetE + lenE, "%.2f%s", emgBuffer[i], (i < PACKET_SIZE - 1) ? "," : "");
+                        lenR += sprintf(packetR + lenR, "%.2f%s", rectBuffer[i], (i < PACKET_SIZE - 1) ? "," : "");
+                    }
+                    client.println(packetE); 
+                    client.println(packetR); 
+                    bufferIndex = 0; 
                 }
             }
         }
     }
+}
 
-    private fun updateChart(espId: Int, valueStr: String, rawLine: String) {
-        if (layoutPlot.visibility == View.VISIBLE && !swViewMode.isChecked) {
-            tvConsole.append("$rawLine\n")
-            if (tvConsole.text.length > 3000) tvConsole.text = tvConsole.text.substring(1500)
+// Fungsi LPF
+float Filter_LPF(float inputVal) 
+{
+    x_lpf[2] = x_lpf[1]; x_lpf[1] = x_lpf[0]; y_lpf[2] = y_lpf[1]; y_lpf[1] = y_lpf[0]; x_lpf[0] = inputVal;
+    y_lpf[0] = b_lpf[0]*x_lpf[0] + b_lpf[1]*x_lpf[1] + b_lpf[2]*x_lpf[2] - a_lpf[1]*y_lpf[1] - a_lpf[2]*y_lpf[2]; return y_lpf[0];
+}
+
+// Fungsi HPF
+float Filter_HPF(float inputVal) 
+{
+    x_hpf[2] = x_hpf[1]; x_hpf[1] = x_hpf[0]; y_hpf[2] = y_hpf[1]; y_hpf[1] = y_hpf[0]; x_hpf[0] = inputVal;
+    y_hpf[0] = b_hpf[0]*x_hpf[0] + b_hpf[1]*x_hpf[1] + b_hpf[2]*x_hpf[2] - a_hpf[1]*y_hpf[1] - a_hpf[2]*y_hpf[2]; return y_hpf[0];
+}
+
+// Fungsi Pengaturan LED
+void setLED(int r, int g, int b) 
+{
+    analogWrite(ledPin1, r);
+    analogWrite(ledPin2, g);
+    analogWrite(ledPin3, b); 
+}
+
+// Fungsi Pengaturan Daya Analog
+void updateAnalogPower(bool state) 
+{
+    digitalWrite(PMOSPin, state ? HIGH : LOW);
+    digitalWrite(LDO_EN_Pin, state ? HIGH : LOW); 
+}
+
+// Fungsi Sleep Mode
+void goToSleep() 
+{
+    setLED(0, 0, 0); 
+    updateAnalogPower(false); 
+    WiFi.disconnect(true); 
+    WiFi.mode(WIFI_OFF);
+    rtc_gpio_init((gpio_num_t)GPIO_NUM_2); 
+    rtc_gpio_set_direction((gpio_num_t)GPIO_NUM_2, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pulldown_en((gpio_num_t)GPIO_NUM_2); 
+    esp_sleep_enable_ext1_wakeup(1ULL << GPIO_NUM_2, ESP_EXT1_WAKEUP_ANY_HIGH);
+    esp_deep_sleep_start();
+}
+
+// Fungsi Mencari Host
+void tryReconnect() 
+{
+    updateAnalogPower(false); 
+    systemActive = false; 
+    greenLedDone = false; 
+    syncSent = false;
+    unsigned long startAttempt = millis();
+    while (millis() - startAttempt < wifiTimeoutMs) {
+        if (WiFi.status() == WL_CONNECTED) {
+            systemActive = true; 
+            connectedMillis = millis(); 
+            setLED(cnR, cnG, cnB); 
+            delay(2500); 
+            return; 
         }
-
-        if (System.currentTimeMillis() - mosfetOnTime < SPIKE_IGNORE_DURATION) {
-            return
-        }
-
-        val valuesArray = valueStr.split(",")
-        var hasNewData = false
-
-        for (vStr in valuesArray) {
-            val value = vStr.trim().replace(",", ".").toFloatOrNull() ?: continue
-            if (espId == 1) {
-                entries1.add(Entry(timeIndex1++, value))
-            } else {
-                entries2.add(Entry(timeIndex2++, value))
-            }
-            hasNewData = true
-        }
-
-        if (espId == 1 && entries1.size > maxBuffer) {
-            entries1.subList(0, entries1.size - maxBuffer).clear()
-        } else if (espId == 2 && entries2.size > maxBuffer) {
-            entries2.subList(0, entries2.size - maxBuffer).clear()
-        }
-
-        if (hasNewData) {
-            if (espId == 1) lineDataSet1.notifyDataSetChanged()
-            else lineDataSet2.notifyDataSetChanged()
-
-            updateCounter++
-
-            if (updateCounter % 5 == 0) {
-                lineChart.data.notifyDataChanged()
-                lineChart.notifyDataSetChanged()
-
-                lineChart.setVisibleXRangeMaximum(cameraLength)
-                lineChart.setVisibleXRangeMinimum(cameraLength)
-
-                val maxTime = maxOf(timeIndex1, timeIndex2)
-                val scrollTarget = if (maxTime > cameraLength) maxTime - cameraLength else 0f
-                lineChart.moveViewToX(scrollTarget)
-
-                if (layoutPlot.visibility == View.VISIBLE && swViewMode.isChecked) {
-                    lineChart.invalidate()
-                }
-            }
-        }
+        ((millis() / 1000) % 2 == 0) ? setLED(srR, srG, srB) : setLED(0, 0, 0); 
+        delay(100);
     }
-
-    override fun onDestroy() { super.onDestroy(); serverJob?.cancel() }
+    goToSleep();
 }
