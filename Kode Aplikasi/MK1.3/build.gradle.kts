@@ -45,6 +45,9 @@ dependencies {
     // Library Grafik
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 
+    // Library FFT
+    implementation("com.github.wendykierp:JTransforms:3.1")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
