@@ -51,26 +51,37 @@ const int dimIntensity = 12;
 const float samplingFrequency = 2500.0;
 const int PACKET_SIZE = 50; 
 float emgBuffer[PACKET_SIZE];
-float rectBuffer[PACKET_SIZE]; // Buffer untuk Rectified EMG
+float rectBuffer[PACKET_SIZE];
 int bufferIndex = 0;
 const unsigned long intervalMicros = (unsigned long)(1000000.0 / samplingFrequency);
 unsigned long previousMicros = 0;
 const int emg_offset = 2022;
 
 // Variabel Filter
-float x_lpf[3], y_lpf[3], x_hpf[3], y_hpf[3];
-const float b_lpf[3] = {0.2065720838f, 0.4131441677f, 0.2065720838f};
-const float a_lpf[3] = {1.0000000000f, -0.3695273774f, 0.1958157127f};
-const float b_hpf[3] = {0.9650809863f, -1.9301619727f, 0.9650809863f};
-const float a_hpf[3] = {1.0000000000f, -1.9289422633f, 0.9313816821f};
+double x_bp[3] = {0}, y_bp[3] = {0};
+const double b_bp[3] = { 0.37496517, 0.0, -0.37496517 };
+const double a_bp[3] = { 1.0, -1.21081103, 0.25006966 };
+const int MA_WINDOW = 100; 
+float ma_buffer[MA_WINDOW] = {0};
+int ma_index = 0;
+float ma_sum = 0;
+
+
+// Variabel Deteksi Onset
+const float threshold_detection = 15;
+const unsigned long debounce_samples = 1250;
+unsigned long last_onset_idx = 0;
+unsigned long sampleCount = 0;
+bool is_active = false;
+bool onset_state_changed = false;
 
 // Deklarasi Fungsi
 void setLED(int r, int g, int b);
 void updateAnalogPower(bool state);
 void goToSleep();
 void tryReconnect();
-float Filter_LPF(float inputVal);
-float Filter_HPF(float inputVal);
+double Filter_BPF(double inputVal);
+double Filter_LPF(double inputVal);
 
 // Fungsi Setup
 void setup() 
@@ -229,21 +240,34 @@ void loop()
                     requestBuffer += c;
                 } 
             }
+            
             if (currentMicros - previousMicros >= intervalMicros) 
             {
                 previousMicros += intervalMicros;
+                sampleCount++;
+                
                 int rawValue = analogRead(EMGPin);
                 int centeredValue = rawValue - emg_offset;
-                float hpfValue = Filter_HPF((float)centeredValue);
-                float lpfValue = Filter_LPF(hpfValue); 
-                float emgMV = (lpfValue / 4095.0f) * 3300.0f;
-                float emgRect = abs(emgMV);
+                double bpValue = Filter_BPF((double)centeredValue);
+                float emgMV = (bpValue / 4095.0f) * 3300.0f; 
+                double emgRect = abs(emgMV);
+                double envelope = Filter_LPF_MA(emgRect);
+                if (envelope > threshold_detection) {
+                    if (!is_active && (sampleCount - last_onset_idx > debounce_samples)) {
+                        is_active = true;
+                        last_onset_idx = sampleCount;
+                    }
+                } else {
+                    is_active = false;
+                }
+
                 if (bufferIndex < PACKET_SIZE) 
                 {
                     emgBuffer[bufferIndex] = emgMV;
-                    rectBuffer[bufferIndex] = emgRect;
+                    rectBuffer[bufferIndex] = (float)envelope; // Dikirim sebagai Rectifier ke Android
                     bufferIndex++;
                 }
+                
                 if (bufferIndex >= PACKET_SIZE) 
                 {
                     char packetE[400];
@@ -256,6 +280,8 @@ void loop()
                     }
                     client.println(packetE); 
                     client.println(packetR); 
+                    client.printf("O%d:%d\n", DEVICE_ID, is_active ? 1 : 0);
+                    
                     bufferIndex = 0; 
                 }
             }
@@ -263,18 +289,21 @@ void loop()
     }
 }
 
-// Fungsi LPF
-float Filter_LPF(float inputVal) 
-{
-    x_lpf[2] = x_lpf[1]; x_lpf[1] = x_lpf[0]; y_lpf[2] = y_lpf[1]; y_lpf[1] = y_lpf[0]; x_lpf[0] = inputVal;
-    y_lpf[0] = b_lpf[0]*x_lpf[0] + b_lpf[1]*x_lpf[1] + b_lpf[2]*x_lpf[2] - a_lpf[1]*y_lpf[1] - a_lpf[2]*y_lpf[2]; return y_lpf[0];
+// Fungsi BPF
+double Filter_BPF(double inputVal) {
+    x_bp[2] = x_bp[1]; x_bp[1] = x_bp[0]; x_bp[0] = inputVal;
+    y_bp[2] = y_bp[1]; y_bp[1] = y_bp[0];
+    y_bp[0] = (b_bp[0]*x_bp[0] + b_bp[1]*x_bp[1] + b_bp[2]*x_bp[2]) - (a_bp[1]*y_bp[1] + a_bp[2]*y_bp[2]);
+    return y_bp[0];
 }
 
-// Fungsi HPF
-float Filter_HPF(float inputVal) 
-{
-    x_hpf[2] = x_hpf[1]; x_hpf[1] = x_hpf[0]; y_hpf[2] = y_hpf[1]; y_hpf[1] = y_hpf[0]; x_hpf[0] = inputVal;
-    y_hpf[0] = b_hpf[0]*x_hpf[0] + b_hpf[1]*x_hpf[1] + b_hpf[2]*x_hpf[2] - a_hpf[1]*y_hpf[1] - a_hpf[2]*y_hpf[2]; return y_hpf[0];
+// Fungsi LPF Moving Average
+float Filter_LPF_MA(float inputVal) {
+    ma_sum -= ma_buffer[ma_index];
+    ma_buffer[ma_index] = inputVal;
+    ma_sum += ma_buffer[ma_index];
+    ma_index = (ma_index + 1) % MA_WINDOW;
+    return ma_sum / MA_WINDOW;
 }
 
 // Fungsi Pengaturan LED
