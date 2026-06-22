@@ -61,7 +61,7 @@ const int emg_offset = 2022;
 double x_bp[3] = {0}, y_bp[3] = {0};
 const double b_bp[3] = { 0.37496517, 0.0, -0.37496517 };
 const double a_bp[3] = { 1.0, -1.21081103, 0.25006966 };
-const int MA_WINDOW = 100; 
+const int MA_WINDOW = 125; 
 float ma_buffer[MA_WINDOW] = {0};
 int ma_index = 0;
 float ma_sum = 0;
